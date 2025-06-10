@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Share2, Upload, Maximize2, RefreshCw, ArrowLeft, Eye } from 'lucide-react';
+import { Share2, Upload, Maximize2, RefreshCw, ArrowLeft, Eye, X } from 'lucide-react';
 import { ErrorBoundary } from 'react-error-boundary';
 import { useRealtimeCollage } from '../hooks/useRealtimeCollage';
 import { useSceneStore } from '../store/sceneStore';
@@ -33,13 +33,14 @@ const CollageViewerPage: React.FC = () => {
   const { code } = useParams<{ code: string }>();
   const navigate = useNavigate();
   
-  // Use the fixed useRealtimeCollage hook
+  // Use the realtime collage hook - this should fetch photos automatically
   const { 
     currentCollage, 
     photos, 
     loading, 
     error, 
-    isRealtimeConnected 
+    isRealtimeConnected,
+    refreshPhotos
   } = useRealtimeCollage({ 
     collageCode: code 
   });
@@ -47,6 +48,27 @@ const CollageViewerPage: React.FC = () => {
   const { settings } = useSceneStore();
   const [showUploader, setShowUploader] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
+
+  // Debug: Log photos when they change
+  useEffect(() => {
+    console.log('🖼️ VIEWER: Photos updated:', {
+      count: photos.length,
+      collageId: currentCollage?.id,
+      photos: photos.slice(0, 3).map(p => ({ id: p.id, url: p.url.slice(-20) }))
+    });
+  }, [photos.length, currentCollage?.id]);
+
+  // Manual refresh function
+  const handleRefresh = async () => {
+    if (currentCollage?.id) {
+      console.log('🔄 VIEWER: Manual refresh triggered');
+      try {
+        await refreshPhotos();
+      } catch (error) {
+        console.error('❌ VIEWER: Refresh failed:', error);
+      }
+    }
+  };
 
   const toggleFullscreen = () => {
     if (!document.fullscreenElement) {
@@ -149,6 +171,14 @@ const CollageViewerPage: React.FC = () => {
                 
                 <div className="flex items-center space-x-2">
                   <button
+                    onClick={handleRefresh}
+                    className="p-2 bg-gray-600 hover:bg-gray-700 text-white rounded-lg transition-colors"
+                    title="Refresh Photos"
+                  >
+                    <RefreshCw className="w-5 h-5" />
+                  </button>
+                  
+                  <button
                     onClick={() => setShowUploader(!showUploader)}
                     className="p-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors"
                     title="Upload Photos"
@@ -201,8 +231,7 @@ const CollageViewerPage: React.FC = () => {
               <PhotoUploader 
                 collageId={currentCollage.id}
                 onUploadComplete={() => {
-                  // Photos will appear automatically via realtime
-                  console.log('Upload completed, realtime should update the scene');
+                  console.log('📤 VIEWER: Upload completed, realtime should update the scene');
                 }}
               />
             </div>
@@ -221,6 +250,15 @@ const CollageViewerPage: React.FC = () => {
             />
           </ErrorBoundary>
         </div>
+
+        {/* Debug Info - Remove in production */}
+        {!isFullscreen && (
+          <div className="absolute bottom-4 left-4 bg-black/70 text-white text-xs p-2 rounded">
+            <div>Collage ID: {currentCollage.id}</div>
+            <div>Photos: {photos.length}</div>
+            <div>Realtime: {isRealtimeConnected ? '✅' : '❌'}</div>
+          </div>
+        )}
 
         {/* Fullscreen Exit Button */}
         {isFullscreen && (
