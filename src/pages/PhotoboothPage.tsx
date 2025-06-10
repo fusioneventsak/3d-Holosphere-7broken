@@ -2,7 +2,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Camera, SwitchCamera, Download, Send, X, RefreshCw, Type, ArrowLeft, Settings } from 'lucide-react';
-import { useCollageStore, Photo } from '../store/collageStore';
+import { useRealtimeCollage } from '../hooks/useRealtimeCollage';
 import Layout from '../components/layout/Layout';
 
 type VideoDevice = {
@@ -28,7 +28,10 @@ const PhotoboothPage: React.FC = () => {
   const [uploading, setUploading] = useState(false);
   const [cameraState, setCameraState] = useState<CameraState>('idle');
   
-  const { currentCollage, fetchCollageByCode, uploadPhoto, setupRealtimeSubscription, cleanupRealtimeSubscription } = useCollageStore();
+  // Use the fixed useRealtimeCollage hook instead of manual store setup
+  const { currentCollage, uploadPhoto } = useRealtimeCollage({ 
+    collageCode: code 
+  });
 
   const cleanupCamera = useCallback(() => {
     console.log('🧹 Cleaning up camera...');
@@ -110,102 +113,92 @@ const PhotoboothPage: React.FC = () => {
         };
       } else {
         constraints = {
-          video: isMobile ? { facingMode: "user" } : true,
+          video: isMobile ? {
+            facingMode: "user",
+            width: { ideal: 1280, max: 1920 },
+            height: { ideal: 720, max: 1080 }
+          } : {
+            width: { ideal: 1280, max: 1920 },
+            height: { ideal: 720, max: 1080 }
+          },
           audio: false
         };
       }
+
+      console.log('🎥 Requesting user media with constraints:', constraints);
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
       
-      console.log('🔧 Using constraints:', constraints);
-      
-      // Get user media
-      const mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
-      console.log('✅ Got media stream:', mediaStream.active);
-      
-      // Update devices list after getting permission
-      const videoDevices = await getVideoDevices();
-      setDevices(videoDevices);
-      
-      // Auto-select front camera on mobile if not already selected
-      if (!selectedDevice && videoDevices.length > 0 && isMobile) {
-        const frontCamera = videoDevices.find(device => 
-          device.label.toLowerCase().includes('front') ||
-          device.label.toLowerCase().includes('user') ||
-          device.label.toLowerCase().includes('selfie') ||
-          device.label.toLowerCase().includes('facetime')
-        );
-        
-        if (frontCamera) {
-          console.log('📱 Auto-selecting front camera:', frontCamera.label);
-          setSelectedDevice(frontCamera.deviceId);
-        } else {
-          setSelectedDevice(videoDevices[0].deviceId);
-        }
+      if (!videoRef.current) {
+        console.error('❌ Video ref not available');
+        throw new Error('Video element not ready');
       }
+
+      streamRef.current = stream;
+      videoRef.current.srcObject = stream;
       
-      // Set up video element
-      if (videoRef.current) {
-        videoRef.current.srcObject = mediaStream;
-        
-        // Setup event listeners
-        const video = videoRef.current;
-        
-        const handleLoadedMetadata = () => {
-          console.log('📹 Video metadata loaded, playing...');
-          video.play().then(() => {
-            streamRef.current = mediaStream;
-            setCameraState('active');
-            console.log('✅ Camera active and streaming');
-          }).catch(playErr => {
-            console.error('❌ Failed to play video:', playErr);
-            setCameraState('error');
-            setError('Failed to start video playback');
-          });
+      await new Promise((resolve, reject) => {
+        if (!videoRef.current) {
+          reject(new Error('Video element not available'));
+          return;
+        }
+
+        videoRef.current.onloadedmetadata = () => {
+          console.log('✅ Video metadata loaded');
+          resolve(undefined);
         };
         
-        video.addEventListener('loadedmetadata', handleLoadedMetadata, { once: true });
+        videoRef.current.onerror = (err) => {
+          console.error('❌ Video error:', err);
+          reject(new Error('Video playback failed'));
+        };
         
-        // Timeout fallback
+        // Add timeout for loading
         setTimeout(() => {
-          if (cameraState === 'starting') {
-            console.log('⏰ Camera start timeout, forcing play...');
-            video.play().catch(console.error);
-          }
-        }, 3000);
-      }
+          reject(new Error('Video loading timeout'));
+        }, 10000);
+      });
+
+      await videoRef.current.play();
+      console.log('✅ Camera started successfully');
+      setCameraState('active');
+
+      // Get and update device list after successful camera start
+      const updatedDevices = await getVideoDevices();
+      setDevices(updatedDevices);
       
+      if (!deviceId && updatedDevices.length > 0) {
+        setSelectedDevice(updatedDevices[0].deviceId);
+      } else if (deviceId) {
+        setSelectedDevice(deviceId);
+      }
+
     } catch (err: any) {
       console.error('❌ Camera initialization failed:', err);
       setCameraState('error');
       
-      let errorMessage = 'Failed to access camera. ';
-      
-      if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
-        errorMessage = 'Camera access denied. Please allow camera access and refresh the page.';
+      let errorMessage = 'Camera error: ';
+      if (err.name === 'NotAllowedError') {
+        errorMessage += 'Camera permission denied. Please allow camera access and refresh.';
       } else if (err.name === 'NotFoundError') {
-        errorMessage = 'No camera found. Please check your camera and try again.';
+        errorMessage += 'No camera found. Please connect a camera.';
       } else if (err.name === 'NotReadableError') {
-        errorMessage = 'Camera is busy. Please close other apps using the camera and try again.';
+        errorMessage += 'Camera is busy or hardware error.';
       } else if (err.name === 'OverconstrainedError') {
-        // Try fallback constraints
+        errorMessage += 'Camera settings not supported. Trying default settings...';
+        
+        // Try with basic constraints
         try {
-          console.log('🔄 Trying fallback constraints...');
-          const fallbackStream = await navigator.mediaDevices.getUserMedia({ 
-            video: { facingMode: "user" }, 
-            audio: false 
-          });
-          
+          const basicStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
           if (videoRef.current) {
-            videoRef.current.srcObject = fallbackStream;
+            streamRef.current = basicStream;
+            videoRef.current.srcObject = basicStream;
             await videoRef.current.play();
-            streamRef.current = fallbackStream;
             setCameraState('active');
             setError(null);
-            console.log('✅ Fallback camera working');
             return;
           }
-        } catch (fallbackError) {
-          console.error('❌ Fallback also failed:', fallbackError);
-          errorMessage = 'Camera not compatible with this device.';
+        } catch (basicErr) {
+          errorMessage += ' Basic camera also failed.';
         }
       } else {
         errorMessage += err.message || 'Unknown camera error.';
@@ -224,25 +217,6 @@ const PhotoboothPage: React.FC = () => {
     const nextIndex = (currentIndex + 1) % devices.length;
     handleDeviceChange(devices[nextIndex].deviceId);
   }, [devices, selectedDevice]);
-
-  // Load collage on mount
-  useEffect(() => {
-    if (code) {
-      useCollageStore.getState().fetchCollageByCode(code);
-    }
-  }, [code]);
-
-  // Setup realtime subscription when collage is loaded
-  useEffect(() => {
-    if (currentCollage?.id) {
-      console.log('🔄 Setting up realtime subscription in photobooth for collage:', currentCollage.id);
-      useCollageStore.getState().setupRealtimeSubscription(currentCollage.id);
-    }
-    
-    return () => {
-      useCollageStore.getState().cleanupRealtimeSubscription();
-    };
-  }, [currentCollage?.id]);
 
   // Initialize camera when component mounts and when returning from photo view
   useEffect(() => {
@@ -268,56 +242,72 @@ const PhotoboothPage: React.FC = () => {
   useEffect(() => {
     const handleVisibilityChange = () => {
       if (document.hidden) {
-        console.log('📱 Page hidden, pausing camera...');
+        console.log('🙈 Page hidden, pausing camera...');
+        if (streamRef.current) {
+          streamRef.current.getTracks().forEach(track => {
+            track.enabled = false;
+          });
+        }
       } else {
-        console.log('📱 Page visible, resuming camera...');
-        if (!photo && cameraState === 'idle') {
-          setTimeout(() => startCamera(selectedDevice), 100);
+        console.log('👁️ Page visible, resuming camera...');
+        if (streamRef.current) {
+          streamRef.current.getTracks().forEach(track => {
+            track.enabled = true;
+          });
         }
       }
     };
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
-    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
-  }, [photo, cameraState, startCamera, selectedDevice]);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, []);
 
   const capturePhoto = useCallback(() => {
-    if (!videoRef.current || !canvasRef.current || cameraState !== 'active') return;
+    if (!videoRef.current || !canvasRef.current || cameraState !== 'active') {
+      console.warn('⚠️ Cannot capture: video or canvas not ready');
+      return;
+    }
 
     const video = videoRef.current;
     const canvas = canvasRef.current;
     const context = canvas.getContext('2d');
+    
+    if (!context) {
+      console.error('❌ Canvas context not available');
+      return;
+    }
 
-    if (!context) return;
-
+    // Set canvas size to match video
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
 
-    // Draw the video frame
+    // Draw video frame
     context.drawImage(video, 0, 0, canvas.width, canvas.height);
 
     // Add text overlay if provided
     if (text.trim()) {
-      const fontSize = Math.min(canvas.width, canvas.height) * 0.08;
-      context.font = `bold ${fontSize}px Arial`;
+      const fontSize = Math.min(canvas.width / 20, 48);
+      context.font = `bold ${fontSize}px Arial, sans-serif`;
       context.textAlign = 'center';
       context.textBaseline = 'middle';
       
-      // Add shadow for better readability
-      context.shadowColor = 'rgba(0,0,0,0.8)';
+      // Add shadow for better text visibility
+      context.shadowColor = 'rgba(0, 0, 0, 0.8)';
       context.shadowBlur = 4;
       context.shadowOffsetX = 2;
       context.shadowOffsetY = 2;
       
       // White text with black outline
       context.strokeStyle = 'black';
-      context.lineWidth = fontSize * 0.1;
+      context.lineWidth = 3;
       context.fillStyle = 'white';
-      
-      // Split text into lines if too long
-      const maxWidth = canvas.width * 0.9;
-      const words = text.split(' ');
+
+      // Word wrap the text
+      const words = text.trim().split(' ');
       const lines: string[] = [];
+      const maxWidth = canvas.width * 0.8;
       let currentLine = words[0];
 
       for (let i = 1; i < words.length; i++) {
@@ -523,13 +513,13 @@ const PhotoboothPage: React.FC = () => {
                     >
                       {uploading ? (
                         <>
-                          <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                          <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
                           <span>Uploading...</span>
                         </>
                       ) : (
                         <>
                           <Send className="w-4 h-4" />
-                          <span>Upload to Collage</span>
+                          <span>Add to Collage</span>
                         </>
                       )}
                     </button>
@@ -537,70 +527,39 @@ const PhotoboothPage: React.FC = () => {
                 </div>
               ) : (
                 /* Camera View */
-                <div className="relative aspect-video bg-gray-800">
-                  {/* Video Element */}
-                  <video
-                    ref={videoRef}
-                    autoPlay
-                    playsInline
-                    muted
+                <div className="relative aspect-video bg-black">
+                  <video 
+                    ref={videoRef} 
                     className="w-full h-full object-cover"
+                    autoPlay 
+                    playsInline 
+                    muted
                   />
                   
-                  {/* Camera State Overlay */}
-                  {cameraState !== 'active' && (
+                  {cameraState === 'starting' && (
                     <div className="absolute inset-0 flex items-center justify-center bg-black/50">
-                      <div className="text-center text-white">
-                        {cameraState === 'starting' && (
-                          <>
-                            <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-white mb-4"></div>
-                            <p>Starting camera...</p>
-                          </>
-                        )}
-                        {cameraState === 'error' && (
-                          <>
-                            <Camera className="w-12 h-12 mx-auto mb-4 text-red-400" />
-                            <p className="text-red-200">Camera unavailable</p>
-                            <button
-                              onClick={() => startCamera(selectedDevice)}
-                              className="mt-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors"
-                            >
-                              Retry
-                            </button>
-                          </>
-                        )}
-                        {cameraState === 'idle' && (
-                          <>
-                            <Camera className="w-12 h-12 mx-auto mb-4 text-gray-400" />
-                            <p>Camera not started</p>
-                            <button
-                              onClick={() => startCamera(selectedDevice)}
-                              className="mt-2 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors"
-                            >
-                              Start Camera
-                            </button>
-                          </>
-                        )}
+                      <div className="text-center">
+                        <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-white mb-2"></div>
+                        <p className="text-white">Starting camera...</p>
                       </div>
                     </div>
                   )}
                   
-                  {/* Text Overlay Preview */}
-                  {text.trim() && cameraState === 'active' && (
-                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                      <div 
-                        className="text-white font-bold text-center px-4 py-2 bg-black/50 rounded-lg max-w-[90%]"
-                        style={{ 
-                          fontSize: 'clamp(1rem, 4vw, 2rem)',
-                          textShadow: '2px 2px 4px rgba(0,0,0,0.8)'
-                        }}
-                      >
-                        {text}
+                  {cameraState === 'error' && (
+                    <div className="absolute inset-0 flex items-center justify-center bg-red-900/50">
+                      <div className="text-center">
+                        <Camera className="w-12 h-12 text-red-400 mx-auto mb-2" />
+                        <p className="text-red-200">Camera Error</p>
+                        <button
+                          onClick={() => startCamera(selectedDevice)}
+                          className="mt-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors"
+                        >
+                          Retry
+                        </button>
                       </div>
                     </div>
                   )}
                   
-                  {/* Capture Button */}
                   {cameraState === 'active' && (
                     <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2">
                       <button
