@@ -7,7 +7,7 @@ import Layout from '../components/layout/Layout';
 const CollageModerationPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   
-  // Use custom hook for realtime management
+  // This hook will automatically handle realtime updates
   const { 
     currentCollage, 
     photos, 
@@ -15,33 +15,23 @@ const CollageModerationPage: React.FC = () => {
     error, 
     isRealtimeConnected,
     refreshPhotos,
-    deletePhoto
+    deletePhoto,
+    debugInfo
   } = useRealtimeCollage({ 
     collageId: id 
   });
   
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [fetchError, setFetchError] = useState<string | null>(null);
   const [deletingPhotos, setDeletingPhotos] = useState<Set<string>>(new Set());
   const [selectedPhoto, setSelectedPhoto] = useState<any>(null);
 
-  // Debug: Log photos changes
-  React.useEffect(() => {
-    console.log('🛡️ MODERATION: Photos updated - count:', photos.length);
-  }, [photos.length]);
-
   const handleRefresh = async () => {
-    if (!currentCollage?.id) return;
-    
     setIsRefreshing(true);
-    setFetchError(null);
-    
     try {
-      await refreshPhotos(currentCollage.id);
-      console.log('🛡️ MODERATION: Photos refreshed successfully');
+      await refreshPhotos();
+      console.log('🛡️ MODERATION: Manual refresh completed');
     } catch (error: any) {
-      console.error('🛡️ MODERATION: Error refreshing photos:', error);
-      setFetchError(error.message);
+      console.error('🛡️ MODERATION: Refresh error:', error);
     } finally {
       setTimeout(() => setIsRefreshing(false), 500);
     }
@@ -57,9 +47,9 @@ const CollageModerationPage: React.FC = () => {
     
     try {
       await deletePhoto(photoId);
-      console.log('🗑️ Photo deleted successfully:', photoId);
+      console.log('🗑️ MODERATION: Photo deleted, realtime should update UI');
     } catch (error: any) {
-      console.error('🗑️ Error deleting photo:', error);
+      console.error('🗑️ MODERATION: Delete error:', error);
       alert('Failed to delete photo: ' + error.message);
     } finally {
       setDeletingPhotos(prev => {
@@ -70,10 +60,7 @@ const CollageModerationPage: React.FC = () => {
     }
   };
 
-  const openPhotoPreview = (photo: any) => {
-    setSelectedPhoto(photo);
-  };
-
+  // Loading state
   if (loading && !currentCollage) {
     return (
       <Layout>
@@ -87,13 +74,13 @@ const CollageModerationPage: React.FC = () => {
     );
   }
 
+  // Error state
   if (error || !currentCollage) {
     return (
       <Layout>
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           <div className="text-center py-12">
             <h2 className="text-2xl font-bold text-white mb-4">Collage Not Found</h2>
-            <p className="text-gray-400 mb-6">The collage you're looking for doesn't exist.</p>
             <Link
               to="/dashboard"
               className="px-6 py-3 bg-purple-600 hover:bg-purple-700 text-white rounded-md transition-colors"
@@ -112,10 +99,7 @@ const CollageModerationPage: React.FC = () => {
         {/* Header */}
         <div className="flex items-center justify-between mb-8">
           <div className="flex items-center space-x-4">
-            <Link
-              to="/dashboard"
-              className="text-gray-400 hover:text-white transition-colors"
-            >
+            <Link to="/dashboard" className="text-gray-400 hover:text-white transition-colors">
               <ChevronLeft className="w-6 h-6" />
             </Link>
             <div>
@@ -137,6 +121,10 @@ const CollageModerationPage: React.FC = () => {
                     {isRealtimeConnected ? 'Live Updates' : 'Polling'}
                   </span>
                 </div>
+                <span className="text-gray-400">•</span>
+                <span className="text-xs text-gray-500">
+                  Updated: {new Date(debugInfo.lastUpdate).toLocaleTimeString()}
+                </span>
               </div>
             </div>
           </div>
@@ -160,22 +148,14 @@ const CollageModerationPage: React.FC = () => {
           </div>
         </div>
 
-        {/* Error Display */}
-        {fetchError && (
-          <div className="mb-6 p-4 bg-red-500/20 border border-red-500/50 rounded-lg flex items-center text-red-200">
-            <AlertCircle className="h-5 w-5 mr-2" />
-            <span>Error: {fetchError}</span>
-          </div>
-        )}
-
-        {/* Photo Grid */}
+        {/* Photo Grid - This will automatically update when photos change */}
         <div className="bg-gray-900/50 rounded-lg border border-gray-700 p-6">
           {photos.length === 0 ? (
             <div className="text-center py-12">
               <div className="text-6xl mb-4">📸</div>
               <h3 className="text-xl font-bold text-white mb-2">No Photos Yet</h3>
               <p className="text-gray-400 mb-4">
-                Photos uploaded to this collage will appear here for moderation.
+                Photos uploaded to this collage will appear here automatically.
               </p>
               <Link
                 to={`/collage/${currentCollage.code}`}
@@ -196,15 +176,11 @@ const CollageModerationPage: React.FC = () => {
                       src={photo.url}
                       alt="Uploaded photo"
                       className="w-full h-full object-cover cursor-pointer"
-                      onClick={() => openPhotoPreview(photo)}
-                      onError={(e) => {
-                        const target = e.target as HTMLImageElement;
-                        target.src = 'https://via.placeholder.com/400x400?text=Error+Loading';
-                      }}
+                      onClick={() => setSelectedPhoto(photo)}
                     />
                     <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center space-x-2">
                       <button
-                        onClick={() => openPhotoPreview(photo)}
+                        onClick={() => setSelectedPhoto(photo)}
                         className="p-2 bg-blue-600 rounded-full hover:bg-blue-700 transition-colors"
                         title="View full size"
                       >
