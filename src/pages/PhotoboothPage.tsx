@@ -228,21 +228,21 @@ const PhotoboothPage: React.FC = () => {
   // Load collage on mount
   useEffect(() => {
     if (code) {
-      fetchCollageByCode(code);
+      useCollageStore.getState().fetchCollageByCode(code);
     }
-  }, [code, fetchCollageByCode]);
+  }, [code]);
 
   // Setup realtime subscription when collage is loaded
   useEffect(() => {
     if (currentCollage?.id) {
       console.log('🔄 Setting up realtime subscription in photobooth for collage:', currentCollage.id);
-      setupRealtimeSubscription(currentCollage.id);
+      useCollageStore.getState().setupRealtimeSubscription(currentCollage.id);
     }
     
     return () => {
-      cleanupRealtimeSubscription();
+      useCollageStore.getState().cleanupRealtimeSubscription();
     };
-  }, [currentCollage?.id, setupRealtimeSubscription, cleanupRealtimeSubscription]);
+  }, [currentCollage?.id]);
 
   // Initialize camera when component mounts and when returning from photo view
   useEffect(() => {
