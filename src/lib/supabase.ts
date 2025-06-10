@@ -4,19 +4,24 @@ const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
 if (!supabaseUrl || !supabaseAnonKey) {
-  throw new Error('Missing Supabase environment variables');
+  console.error('Missing Supabase environment variables. Please check your .env file.');
+  console.error('Required variables: VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY');
 }
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-  realtime: {
-    params: {
-      eventsPerSecond: 10
-    }
-  }
-});
+export const supabase = supabaseUrl && supabaseAnonKey 
+  ? createClient(supabaseUrl, supabaseAnonKey, {
+      realtime: {
+        params: {
+          eventsPerSecond: 10
+        }
+      }
+    })
+  : null;
 
 // Photo upload helper
 export const uploadPhoto = async (file: File, collageId: string) => {
+  if (!supabase) throw new Error('Supabase not configured');
+  
   try {
     const fileExt = file.name.split('.').pop();
     const fileName = `${collageId}/${Date.now()}.${fileExt}`;
@@ -54,6 +59,8 @@ export const uploadPhoto = async (file: File, collageId: string) => {
 
 // Photo deletion helper
 export const deletePhoto = async (photoId: string, photoUrl: string) => {
+  if (!supabase) throw new Error('Supabase not configured');
+  
   try {
     // Extract file path from URL
     const urlParts = photoUrl.split('/');
@@ -88,6 +95,8 @@ export const deletePhoto = async (photoId: string, photoUrl: string) => {
 
 // Get collage by code
 export const getCollageByCode = async (code: string) => {
+  if (!supabase) throw new Error('Supabase not configured');
+  
   const { data, error } = await supabase
     .from('collages')
     .select('*')
@@ -100,6 +109,8 @@ export const getCollageByCode = async (code: string) => {
 
 // Create new collage
 export const createCollage = async (name: string, code: string) => {
+  if (!supabase) throw new Error('Supabase not configured');
+  
   const { data, error } = await supabase
     .from('collages')
     .insert({ name, code })
@@ -112,6 +123,8 @@ export const createCollage = async (name: string, code: string) => {
 
 // Update collage settings
 export const updateCollageSettings = async (collageId: string, settings: any) => {
+  if (!supabase) throw new Error('Supabase not configured');
+  
   const { data, error } = await supabase
     .from('collage_settings')
     .upsert({
