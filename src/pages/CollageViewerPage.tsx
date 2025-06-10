@@ -129,6 +129,10 @@ export const CollageViewer: React.FC<CollageViewerProps> = ({ collageCode }) => 
       setLoading(true);
       setError(null);
 
+      if (!supabase) {
+        throw new Error('Supabase not configured. Please check your environment variables.');
+      }
+
       // Get collage by code
       const { data: collageData, error: collageError } = await supabase
         .from('collages')
@@ -184,7 +188,7 @@ export const CollageViewer: React.FC<CollageViewerProps> = ({ collageCode }) => 
 
   // Set up realtime subscription
   const setupRealtimeSubscription = useCallback(() => {
-    if (!collageId) return;
+    if (!collageId || !supabase) return;
 
     // Clean up existing subscription
     if (realtimeChannelRef.current) {
