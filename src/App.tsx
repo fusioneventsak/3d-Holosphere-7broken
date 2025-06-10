@@ -4,28 +4,31 @@ import { Toaster } from 'react-hot-toast';
 import CollageViewerPage from './pages/CollageViewerPage';
 import CollageEditorPage from './pages/CollageEditorPage';
 import LandingPage from './pages/LandingPage';
-import JoinPage from './pages/JoinPage';
+import JoinCollage from './pages/JoinCollage';
 import DashboardPage from './pages/DashboardPage';
+import LoginPage from './pages/LoginPage';
+import SignupPage from './pages/SignupPage';
+import CollageModerationPage from './pages/CollageModerationPage';
+import PhotoboothPage from './pages/PhotoboothPage';
 
 const App: React.FC = () => {
   return (
     <Router>
       <div className="min-h-screen bg-black">
         <Routes>
-          {/* Landing page */}
+          {/* Public routes */}
           <Route path="/" element={<LandingPage />} />
-          
-          {/* Join collage page */}
-          <Route path="/join" element={<JoinPage />} />
-          
-          {/* Collage viewer page */}
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/signup" element={<SignupPage />} />
+          <Route path="/join" element={<JoinCollage />} />
           <Route path="/collage/:code" element={<CollageViewerPage />} />
-          
-          {/* Collage editor page */}
-          <Route path="/collage/:id/edit" element={<CollageEditorPage />} />
-          
-          {/* Dashboard page */}
+          <Route path="/photobooth/:code" element={<PhotoboothPage />} />
           <Route path="/dashboard" element={<DashboardPage />} />
+          <Route path="/dashboard/collage/:id" element={<CollageEditorPage />} />
+          
+          {/* Moderation routes */}
+          <Route path="/collage/:id/moderation" element={<CollageModerationPage />} />
+          <Route path="/moderation/:id" element={<CollageModerationPage />} />
           
           {/* Redirect unknown routes to landing */}
           <Route path="*" element={<Navigate to="/" replace />} />
