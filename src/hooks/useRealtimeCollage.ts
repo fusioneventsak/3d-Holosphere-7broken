@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { useCollageStore } from '../store/collageStore';
 
 interface UseRealtimeCollageOptions {
@@ -12,26 +12,46 @@ export const useRealtimeCollage = ({
   collageCode, 
   autoConnect = true 
 }: UseRealtimeCollageOptions) => {
-  const store = useCollageStore();
-  const hasConnected = useRef(false);
+  // Get store state only for data that needs to trigger re-renders
+  const currentCollage = useCollageStore(state => state.currentCollage);
+  const photos = useCollageStore(state => state.photos);
+  const loading = useCollageStore(state => state.loading);
+  const error = useCollageStore(state => state.error);
+  const isRealtimeConnected = useCollageStore(state => state.isRealtimeConnected);
   
-  // STABLE PHOTO COUNT - Only track count, not array reference
-  const [stablePhotoCount, setStablePhotoCount] = useState(0);
-  
-  // Update stable photo count when photos change
-  useEffect(() => {
-    const currentCount = Array.isArray(store.photos) ? store.photos.length : 0;
-    setStablePhotoCount(currentCount);
-  }, [store.photos]);
+  // Track if we've already set up the connection for this specific ID/code
+  const connectionKeyRef = useRef<string | null>(null);
+  const [debugInfo, setDebugInfo] = useState({
+    connectionAttempts: 0,
+    lastUpdate: Date.now()
+  });
 
-  // Connection setup (unchanged)
+  // Effect to handle connection setup - avoid store method dependencies
   useEffect(() => {
-    if (!autoConnect || hasConnected.current) return;
+    if (!autoConnect) return;
     
+    // Create a unique key for this connection
+    const currentKey = collageId || collageCode;
+    if (!currentKey) return;
+    
+    // Don't reconnect if we're already connected to the same collage
+    if (connectionKeyRef.current === currentKey) {
+      return;
+    }
+    
+    console.log('🪝 HOOK: Setting up new connection for:', currentKey);
+    connectionKeyRef.current = currentKey;
+    
+    // Setup the connection using the store's getState method to avoid dependency issues
     const setupConnection = async () => {
-      hasConnected.current = true;
-      
       try {
+        setDebugInfo(prev => ({ 
+          ...prev, 
+          connectionAttempts: prev.connectionAttempts + 1 
+        }));
+        
+        const store = useCollageStore.getState();
+        
         if (collageId) {
           console.log('🪝 HOOK: Connecting to collage by ID:', collageId);
           await store.fetchCollageById(collageId);
@@ -41,32 +61,28 @@ export const useRealtimeCollage = ({
         }
       } catch (error) {
         console.error('🪝 HOOK: Connection error:', error);
-        hasConnected.current = false;
+        // Reset connection key on failure so we can retry
+        connectionKeyRef.current = null;
       }
     };
 
     setupConnection();
 
+    // Cleanup function
     return () => {
-      console.log('🪝 HOOK: Cleaning up connection');
-      hasConnected.current = false;
-      store.cleanupRealtimeSubscription();
+      console.log('🪝 HOOK: Cleaning up connection for:', currentKey);
+      connectionKeyRef.current = null;
+      useCollageStore.getState().cleanupRealtimeSubscription();
     };
-  }, [collageId, collageCode, autoConnect, store]);
+  }, [collageId, collageCode, autoConnect]); // Only primitive dependencies
 
-  // Debug info state
-  const [debugInfo, setDebugInfo] = useState({
-    connectionAttempts: 0,
-    lastUpdate: Date.now()
-  });
-
-  // Update debug info when photos change
+  // Debug effect to track photo changes
   useEffect(() => {
-    if (store.photos.length > 0) {
+    if (photos.length > 0) {
       console.log('🪝 HOOK: Photos updated!', {
-        count: store.photos.length,
-        ids: store.photos.slice(0, 3).map(p => p.id.slice(-4)), // Show first 3
-        realtime: store.isRealtimeConnected
+        count: photos.length,
+        ids: photos.slice(0, 3).map(p => p.id.slice(-4)), // Show first 3
+        realtime: isRealtimeConnected
       });
       
       setDebugInfo(prev => ({ 
@@ -74,30 +90,38 @@ export const useRealtimeCollage = ({
         lastUpdate: Date.now() 
       }));
     }
-  }, [store.photos, store.isRealtimeConnected]);
+  }, [photos.length, isRealtimeConnected]);
 
-  // Manual refresh function
-  const manualRefresh = async () => {
-    if (store.currentCollage?.id) {
+  // Manual refresh function with stable reference
+  const manualRefresh = useCallback(async () => {
+    if (currentCollage?.id) {
       console.log('🪝 HOOK: Manual refresh triggered');
-      await store.refreshPhotos(store.currentCollage.id);
+      await useCollageStore.getState().refreshPhotos(currentCollage.id);
     }
-  };
+  }, [currentCollage?.id]); // Only depend on the ID
+
+  // Create stable action functions
+  const deletePhotoAction = useCallback((photoId: string) => {
+    return useCollageStore.getState().deletePhoto(photoId);
+  }, []);
+
+  const uploadPhotoAction = useCallback((collageId: string, file: File) => {
+    return useCollageStore.getState().uploadPhoto(collageId, file);
+  }, []);
 
   // Return all the data components need
   return {
     // Core data
-    currentCollage: store.currentCollage,
-    photos: Array.isArray(store.photos) ? store.photos : [], // Safety check
-    photoCount: stablePhotoCount, // Stable count for ErrorBoundary
-    loading: store.loading,
-    error: store.error,
-    isRealtimeConnected: store.isRealtimeConnected,
+    currentCollage,
+    photos: Array.isArray(photos) ? photos : [], // Safety check
+    loading,
+    error,
+    isRealtimeConnected,
     
-    // Actions
+    // Actions with stable references
     refreshPhotos: manualRefresh,
-    deletePhoto: store.deletePhoto,
-    uploadPhoto: store.uploadPhoto,
+    deletePhoto: deletePhotoAction,
+    uploadPhoto: uploadPhotoAction,
     
     // Debug info
     debugInfo
