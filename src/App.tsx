@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { CollageViewer } from './components/CollageViewer';
+import { CollageViewerPage } from './pages/CollageViewerPage';
 import { PhotoUpload } from './components/PhotoUpload';
 import { supabase, getCollageByCode } from './lib/supabase';
 
@@ -107,7 +107,7 @@ const App: React.FC = () => {
 
       {/* Main Collage Viewer */}
       {collageId ? (
-        <CollageViewer collageCode={collageCode} />
+        <CollageViewerPage collageCode={collageCode} />
       ) : (
         <div className="flex items-center justify-center h-full text-white">
           <div className="text-center">
