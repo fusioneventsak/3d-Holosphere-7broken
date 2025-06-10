@@ -6,17 +6,27 @@ type CollagePhotosProps = {
 };
 
 const CollagePhotos: React.FC<CollagePhotosProps> = ({ collageId }) => {
-  const { photos, loading, fetchPhotosByCollageId, subscribeToPhotos } = useCollageStore();
+  // Get only the data we need to avoid dependency issues
+  const photos = useCollageStore(state => state.photos);
+  const loading = useCollageStore(state => state.loading);
 
   useEffect(() => {
-    fetchPhotosByCollageId(collageId);
+    if (!collageId) return;
     
-    // Subscribe to real-time updates
-    const unsubscribe = subscribeToPhotos(collageId);
+    // Use getState() to avoid dependency issues
+    const store = useCollageStore.getState();
+    
+    // Fetch photos for this collage
+    store.fetchPhotosByCollageId(collageId);
+    
+    // Setup realtime subscription for this collage
+    store.setupRealtimeSubscription(collageId);
+    
+    // Cleanup on unmount or collageId change
     return () => {
-      unsubscribe();
+      store.cleanupRealtimeSubscription();
     };
-  }, [collageId, fetchPhotosByCollageId]);
+  }, [collageId]); // Only depend on collageId
 
   if (loading && photos.length === 0) {
     return (
