@@ -1,64 +1,35 @@
-// src/pages/CollageModerationPage.tsx - ENHANCED VERSION WITH BETTER DELETION
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { ChevronLeft, Shield, RefreshCw, Trash2, Eye, AlertCircle } from 'lucide-react';
-import { useCollageStore } from '../store/collageStore';
+import { useRealtimeCollage } from '../hooks/useRealtimeCollage';
 import Layout from '../components/layout/Layout';
 
 const CollageModerationPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
+  
+  // Use custom hook for realtime management
   const { 
     currentCollage, 
     photos, 
-    fetchCollageById, 
-    deletePhoto, 
     loading, 
     error, 
-    refreshPhotos,
     isRealtimeConnected,
-    setupRealtimeSubscription,
-    cleanupRealtimeSubscription
-  } = useCollageStore();
-  
-  // SAFETY: Ensure photos is always an array
-  const safePhotos = Array.isArray(photos) ? photos : [];
+    refreshPhotos,
+    deletePhoto
+  } = useRealtimeCollage({ 
+    collageId: id 
+  });
   
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [deletingPhotos, setDeletingPhotos] = useState<Set<string>>(new Set());
   const [selectedPhoto, setSelectedPhoto] = useState<any>(null);
 
-  // DEBUG: Log photos changes in moderation
-  useEffect(() => {
-    console.log('🛡️ MODERATION: Photos array changed!');
-    console.log('🛡️ Moderation photo count:', safePhotos.length);
-    console.log('🛡️ Moderation photo IDs:', safePhotos.map(p => p.id.slice(-4)));
-  }, [safePhotos]);
+  // Debug: Log photos changes
+  React.useEffect(() => {
+    console.log('🛡️ MODERATION: Photos updated - count:', photos.length);
+  }, [photos.length]);
 
-  // Simple subscription setup
-  useEffect(() => {
-    if (id) {
-      console.log('🛡️ MODERATION: Fetching collage:', id);
-      fetchCollageById(id);
-    }
-    
-    return () => {
-      console.log('🛡️ MODERATION: Cleaning up subscription');
-      cleanupRealtimeSubscription();
-    };
-  }, [id, fetchCollageById, cleanupRealtimeSubscription]);
-
-  // Force reconnect realtime subscription if it disconnects
-  useEffect(() => {
-    if (currentCollage?.id && !isRealtimeConnected) {
-      const reconnectTimer = setTimeout(() => {
-        console.log('🔄 MODERATION: Attempting to reconnect realtime subscription...');
-        setupRealtimeSubscription(currentCollage.id);
-      }, 10000); // Try to reconnect every 10 seconds
-      
-      return () => clearTimeout(reconnectTimer);
-    }
-  }, [currentCollage?.id, isRealtimeConnected, setupRealtimeSubscription]);
   const handleRefresh = async () => {
     if (!currentCollage?.id) return;
     
@@ -85,21 +56,11 @@ const CollageModerationPage: React.FC = () => {
     setDeletingPhotos(prev => new Set(prev).add(photoId));
     
     try {
-      console.log('🗑️ MODERATION: Deleting photo:', photoId);
       await deletePhoto(photoId);
-      console.log('✅ MODERATION: Photo deleted successfully');
-      
-      // Close modal if deleted photo was selected
-      if (selectedPhoto?.id === photoId) {
-        setSelectedPhoto(null);
-      }
-      
+      console.log('🗑️ Photo deleted successfully:', photoId);
     } catch (error: any) {
-      console.error('❌ MODERATION: Delete failed:', error);
-      // Only show error alert for real errors, not "no rows" errors
-      if (error.code !== 'PGRST116' && !error.message?.includes('0 rows')) {
-        alert(`Failed to delete photo: ${error.message}`);
-      }
+      console.error('🗑️ Error deleting photo:', error);
+      alert('Failed to delete photo: ' + error.message);
     } finally {
       setDeletingPhotos(prev => {
         const newSet = new Set(prev);
@@ -113,15 +74,11 @@ const CollageModerationPage: React.FC = () => {
     setSelectedPhoto(photo);
   };
 
-  const closePhotoPreview = () => {
-    setSelectedPhoto(null);
-  };
-
   if (loading && !currentCollage) {
     return (
       <Layout>
-        <div className="min-h-[calc(100vh-160px)] flex items-center justify-center">
-          <div className="text-center">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+          <div className="text-center py-12">
             <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-white"></div>
             <p className="mt-2 text-gray-400">Loading collage...</p>
           </div>
@@ -136,14 +93,11 @@ const CollageModerationPage: React.FC = () => {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           <div className="text-center py-12">
             <h2 className="text-2xl font-bold text-white mb-4">Collage Not Found</h2>
-            <p className="text-gray-400 mb-6">
-              The collage you're looking for doesn't exist or might have been removed.
-            </p>
-            <Link 
-              to="/dashboard" 
-              className="inline-flex items-center px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-md transition-colors"
+            <p className="text-gray-400 mb-6">The collage you're looking for doesn't exist.</p>
+            <Link
+              to="/dashboard"
+              className="px-6 py-3 bg-purple-600 hover:bg-purple-700 text-white rounded-md transition-colors"
             >
-              <ChevronLeft className="w-4 h-4 mr-2" />
               Back to Dashboard
             </Link>
           </div>
@@ -158,27 +112,30 @@ const CollageModerationPage: React.FC = () => {
         {/* Header */}
         <div className="flex items-center justify-between mb-8">
           <div className="flex items-center space-x-4">
-            <Link 
-              to="/dashboard" 
+            <Link
+              to="/dashboard"
               className="text-gray-400 hover:text-white transition-colors"
             >
               <ChevronLeft className="w-6 h-6" />
             </Link>
             <div>
-              <h1 className="text-2xl font-bold text-white flex items-center">
-                <Shield className="w-6 h-6 mr-2 text-blue-400" />
-                Moderate Photos
-              </h1>
-              <div className="flex items-center space-x-2 text-gray-400 text-sm mt-1">
-                <span>{currentCollage.name}</span>
-                <span>•</span>
-                <span>Code: {currentCollage.code}</span>
-                <span>•</span>
-                <span>{safePhotos.length} photos</span>
-                <span>•</span>
+              <div className="flex items-center space-x-2">
+                <Shield className="w-6 h-6 text-purple-400" />
+                <h1 className="text-2xl font-bold text-white">Photo Moderation</h1>
+              </div>
+              <p className="text-gray-400 mt-1">{currentCollage.name}</p>
+              <div className="flex items-center space-x-4 mt-2 text-sm">
+                <span className="text-gray-400">Code: {currentCollage.code}</span>
+                <span className="text-gray-400">•</span>
+                <span className="text-gray-400">{photos.length} photos</span>
+                <span className="text-gray-400">•</span>
                 <div className="flex items-center space-x-1">
-                  <div className={`w-2 h-2 rounded-full ${isRealtimeConnected ? 'bg-green-400' : 'bg-yellow-400'}`}></div>
-                  <span>{isRealtimeConnected ? 'Live Updates' : 'Polling'}</span>
+                  <div className={`w-2 h-2 rounded-full ${
+                    isRealtimeConnected ? 'bg-green-400 animate-pulse' : 'bg-yellow-400'
+                  }`}></div>
+                  <span className="text-gray-400">
+                    {isRealtimeConnected ? 'Live Updates' : 'Polling'}
+                  </span>
                 </div>
               </div>
             </div>
@@ -211,30 +168,9 @@ const CollageModerationPage: React.FC = () => {
           </div>
         )}
 
-        {/* Real-time Status */}
-        <div className="mb-6 p-4 bg-gray-800/50 rounded-lg border border-gray-700">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-3">
-              <div className={`w-3 h-3 rounded-full ${isRealtimeConnected ? 'bg-green-400 animate-pulse' : 'bg-yellow-400'}`}></div>
-              <span className="text-white font-medium">
-                {isRealtimeConnected ? 'Real-time Updates Active' : 'Using Polling Mode'}
-              </span>
-              <span className="text-gray-400 text-sm">
-                {isRealtimeConnected 
-                  ? 'Changes will appear instantly' 
-                  : 'Updates every 2 seconds'
-                }
-              </span>
-            </div>
-            <span className="text-gray-400 text-sm">
-              Last updated: {new Date().toLocaleTimeString()}
-            </span>
-          </div>
-        </div>
-
         {/* Photo Grid */}
         <div className="bg-gray-900/50 rounded-lg border border-gray-700 p-6">
-          {safePhotos.length === 0 ? (
+          {photos.length === 0 ? (
             <div className="text-center py-12">
               <div className="text-6xl mb-4">📸</div>
               <h3 className="text-xl font-bold text-white mb-2">No Photos Yet</h3>
@@ -250,7 +186,7 @@ const CollageModerationPage: React.FC = () => {
             </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-              {safePhotos.map((photo) => (
+              {photos.map((photo) => (
                 <div
                   key={photo.id}
                   className="bg-gray-800 rounded-lg overflow-hidden border border-gray-600 hover:border-gray-500 transition-colors group"
@@ -288,12 +224,9 @@ const CollageModerationPage: React.FC = () => {
                       </button>
                     </div>
                   </div>
-                  <div className="p-3">
+                  <div className="p-2">
                     <p className="text-xs text-gray-400">
-                      Uploaded: {new Date(photo.created_at).toLocaleString()}
-                    </p>
-                    <p className="text-xs text-gray-500 mt-1">
-                      ID: {photo.id.slice(-8)}
+                      {new Date(photo.created_at).toLocaleString()}
                     </p>
                   </div>
                 </div>
@@ -304,50 +237,35 @@ const CollageModerationPage: React.FC = () => {
 
         {/* Photo Preview Modal */}
         {selectedPhoto && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/90">
-            <div className="relative max-w-4xl max-h-[90vh] bg-gray-900 rounded-lg overflow-hidden">
-              <img
-                src={selectedPhoto.url}
-                alt="Full size preview"
-                className="max-w-full max-h-[80vh] object-contain"
-                onError={(e) => {
-                  const target = e.target as HTMLImageElement;
-                  target.src = 'https://via.placeholder.com/800x600?text=Error+Loading';
-                }}
-              />
-              
-              {/* Modal Controls */}
-              <div className="absolute top-4 right-4 flex space-x-2">
+          <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className="max-w-4xl max-h-full bg-gray-900 rounded-lg border border-gray-600 overflow-hidden">
+              <div className="flex items-center justify-between p-4 border-b border-gray-600">
+                <h3 className="text-lg font-bold text-white">Photo Preview</h3>
                 <button
-                  onClick={() => handleDeletePhoto(selectedPhoto.id)}
-                  disabled={deletingPhotos.has(selectedPhoto.id)}
-                  className="p-2 bg-red-600 rounded-full hover:bg-red-700 transition-colors disabled:opacity-50"
-                  title="Delete photo"
+                  onClick={() => setSelectedPhoto(null)}
+                  className="text-gray-400 hover:text-white text-xl"
                 >
-                  {deletingPhotos.has(selectedPhoto.id) ? (
-                    <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  ) : (
-                    <Trash2 className="w-5 h-5 text-white" />
-                  )}
-                </button>
-                <button
-                  onClick={closePhotoPreview}
-                  className="p-2 bg-gray-700 rounded-full hover:bg-gray-600 transition-colors"
-                  title="Close preview"
-                >
-                  ✕
+                  ×
                 </button>
               </div>
-              
-              {/* Photo Info */}
-              <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-4">
-                <div className="text-white">
-                  <p className="text-sm">
+              <div className="p-4">
+                <img
+                  src={selectedPhoto.url}
+                  alt="Full size preview"
+                  className="max-w-full max-h-[70vh] object-contain mx-auto"
+                />
+                <div className="mt-4 flex items-center justify-between">
+                  <p className="text-sm text-gray-400">
                     Uploaded: {new Date(selectedPhoto.created_at).toLocaleString()}
                   </p>
-                  <p className="text-xs text-gray-300 mt-1">
-                    ID: {selectedPhoto.id}
-                  </p>
+                  <button
+                    onClick={() => handleDeletePhoto(selectedPhoto.id)}
+                    disabled={deletingPhotos.has(selectedPhoto.id)}
+                    className="px-3 py-1 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white rounded text-sm flex items-center space-x-1"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                    <span>Delete</span>
+                  </button>
                 </div>
               </div>
             </div>
