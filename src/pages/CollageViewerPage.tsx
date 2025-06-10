@@ -1,335 +1,240 @@
-import React, { useEffect, useState, useRef, useCallback } from 'react';
-import { supabase } from '../lib/supabase';
-import { CollageScene } from './CollageScene';
-import { RealtimeChannel } from '@supabase/supabase-js';
+import React, { useState } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { Share2, Upload, Maximize2, RefreshCw, ArrowLeft, Eye } from 'lucide-react';
+import { ErrorBoundary } from 'react-error-boundary';
+import { useRealtimeCollage } from '../hooks/useRealtimeCollage';
+import { useSceneStore } from '../store/sceneStore';
+import CollageScene from '../components/three/CollageScene';
+import PhotoUploader from '../components/collage/PhotoUploader';
+import Layout from '../components/layout/Layout';
 
-interface Photo {
-  id: string;
-  url: string;
-  collage_id: string;
-  created_at: string;
+// Error fallback component
+function SceneErrorFallback({ error, resetErrorBoundary }: { error: Error; resetErrorBoundary: () => void }) {
+  return (
+    <div className="bg-red-900/30 backdrop-blur-sm rounded-lg border border-gray-500/50 p-6 flex flex-col items-center justify-center h-[calc(100vh-240px)]">
+      <h3 className="text-xl font-bold text-white mb-2">3D Scene Error</h3>
+      <p className="text-red-200 mb-4 text-center max-w-md">
+        There was an error loading the 3D scene. Try refreshing the page.
+      </p>
+      <pre className="bg-black/50 p-3 rounded text-red-300 text-xs max-w-full overflow-auto mb-4 max-h-32">
+        {error.message}
+      </pre>
+      <button
+        onClick={resetErrorBoundary}
+        className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-md transition-colors"
+      >
+        Try Again
+      </button>
+    </div>
+  );
 }
 
-interface StockPhoto {
-  id: string;
-  url: string;
-  category: string;
-  created_at: string;
-}
-
-interface CollageSettings {
-  gridSize: number;
-  floorSize: number;
-  gridColor: string;
-  photoSize: number;
-  floorColor: string;
-  photoCount: number;
-  wallHeight: number;
-  gridEnabled: boolean;
-  gridOpacity: number;
-  cameraHeight: number;
-  floorEnabled: boolean;
-  floorOpacity: number;
-  photoSpacing: number;
-  cameraEnabled: boolean;
-  gridDivisions: number;
-  animationSpeed: number;
-  cameraDistance: number;
-  emptySlotColor: string;
-  floorMetalness: number;
-  floorRoughness: number;
-  spotlightAngle: number;
-  spotlightColor: string;
-  spotlightCount: number;
-  spotlightWidth: number;
-  useStockPhotos: boolean;
-  backgroundColor: string;
-  gridAspectRatio: number;
-  spotlightHeight: number;
-  animationEnabled: boolean;
-  animationPattern: string;
-  photoRotation?: boolean;
-  floorReflectivity: number;
-  spotlightDistance: number;
-  spotlightPenumbra: number;
-  backgroundGradient: boolean;
-  spotlightIntensity: number;
-  cameraRotationSpeed: number;
-  ambientLightIntensity: number;
-  backgroundGradientEnd: string;
-  cameraRotationEnabled: boolean;
-  backgroundGradientAngle: number;
-  backgroundGradientStart: string;
-}
-
-interface CollageViewerProps {
-  collageCode: string;
-}
-
-export const CollageViewer: React.FC<CollageViewerProps> = ({ collageCode }) => {
-  const [photos, setPhotos] = useState<Photo[]>([]);
-  const [stockPhotos, setStockPhotos] = useState<StockPhoto[]>([]);
-  const [settings, setSettings] = useState<CollageSettings | null>(null);
-  const [collageId, setCollageId] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+const CollageViewerPage: React.FC = () => {
+  const { code } = useParams<{ code: string }>();
+  const navigate = useNavigate();
   
-  const containerRef = useRef<HTMLDivElement>(null);
-  const realtimeChannelRef = useRef<RealtimeChannel | null>(null);
+  // Use the fixed useRealtimeCollage hook
+  const { 
+    currentCollage, 
+    photos, 
+    loading, 
+    error, 
+    isRealtimeConnected 
+  } = useRealtimeCollage({ 
+    collageCode: code 
+  });
 
-  // Default settings fallback
-  const defaultSettings: CollageSettings = {
-    gridSize: 200,
-    floorSize: 200,
-    gridColor: "#444444",
-    photoSize: 4.0,
-    floorColor: "#1A1A1A",
-    photoCount: 50,
-    wallHeight: 0,
-    gridEnabled: true,
-    gridOpacity: 1.0,
-    cameraHeight: 10,
-    floorEnabled: true,
-    floorOpacity: 0.8,
-    photoSpacing: 0,
-    cameraEnabled: true,
-    gridDivisions: 30,
-    animationSpeed: 50,
-    cameraDistance: 25,
-    emptySlotColor: "#1A1A1A",
-    floorMetalness: 0.7,
-    floorRoughness: 0.2,
-    spotlightAngle: 0.7853981633974483,
-    spotlightColor: "#ffffff",
-    spotlightCount: 2,
-    spotlightWidth: 0.8,
-    useStockPhotos: true,
-    backgroundColor: "#000000",
-    gridAspectRatio: 1.77778,
-    spotlightHeight: 15,
-    animationEnabled: false,
-    animationPattern: "grid",
-    photoRotation: true,
-    floorReflectivity: 0.8,
-    spotlightDistance: 30,
-    spotlightPenumbra: 0.8,
-    backgroundGradient: false,
-    spotlightIntensity: 200.0,
-    cameraRotationSpeed: 0.2,
-    ambientLightIntensity: 0.5,
-    backgroundGradientEnd: "#1a1a1a",
-    cameraRotationEnabled: true,
-    backgroundGradientAngle: 180,
-    backgroundGradientStart: "#000000"
+  const { settings } = useSceneStore();
+  const [showUploader, setShowUploader] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  const toggleFullscreen = () => {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen();
+      setIsFullscreen(true);
+    } else {
+      document.exitFullscreen();
+      setIsFullscreen(false);
+    }
   };
 
-  // Fetch collage data
-  const fetchCollageData = useCallback(async () => {
-    try {
-      setLoading(true);
-      setError(null);
-
-      if (!supabase) {
-        throw new Error('Supabase not configured. Please check your environment variables.');
+  const shareCollage = async () => {
+    const url = window.location.href;
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: currentCollage?.name || 'Photo Collage',
+          text: 'Check out this amazing 3D photo collage!',
+          url: url,
+        });
+      } catch (error) {
+        console.log('Error sharing:', error);
       }
-
-      // Get collage by code
-      const { data: collageData, error: collageError } = await supabase
-        .from('collages')
-        .select('id, name')
-        .eq('code', collageCode)
-        .single();
-
-      if (collageError) throw collageError;
-      if (!collageData) throw new Error('Collage not found');
-
-      setCollageId(collageData.id);
-
-      // Get photos for this collage
-      const { data: photosData, error: photosError } = await supabase
-        .from('photos')
-        .select('*')
-        .eq('collage_id', collageData.id)
-        .order('created_at', { ascending: true });
-
-      if (photosError) throw photosError;
-      setPhotos(photosData || []);
-
-      // Get stock photos
-      const { data: stockPhotosData, error: stockPhotosError } = await supabase
-        .from('stock_photos')
-        .select('*')
-        .order('created_at', { ascending: true });
-
-      if (stockPhotosError) throw stockPhotosError;
-      setStockPhotos(stockPhotosData || []);
-
-      // Get collage settings
-      const { data: settingsData, error: settingsError } = await supabase
-        .from('collage_settings')
-        .select('settings')
-        .eq('collage_id', collageData.id)
-        .single();
-
-      if (settingsError) {
-        console.warn('Settings not found, using defaults:', settingsError);
-        setSettings(defaultSettings);
-      } else {
-        setSettings({ ...defaultSettings, ...settingsData.settings });
+    } else {
+      // Fallback to clipboard
+      try {
+        await navigator.clipboard.writeText(url);
+        alert('Link copied to clipboard!');
+      } catch (error) {
+        console.log('Error copying to clipboard:', error);
       }
-
-    } catch (err) {
-      console.error('Error fetching collage data:', err);
-      setError(err instanceof Error ? err.message : 'Failed to load collage');
-    } finally {
-      setLoading(false);
     }
-  }, [collageCode, defaultSettings]);
+  };
 
-  // Set up realtime subscription
-  const setupRealtimeSubscription = useCallback(() => {
-    if (!collageId || !supabase) return;
-
-    // Clean up existing subscription
-    if (realtimeChannelRef.current) {
-      supabase.removeChannel(realtimeChannelRef.current);
-    }
-
-    // Create new channel for this collage
-    const channel = supabase
-      .channel(`collage-${collageId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'photos',
-          filter: `collage_id=eq.${collageId}`
-        },
-        (payload) => {
-          console.log('Realtime photo change:', payload);
-          
-          switch (payload.eventType) {
-            case 'INSERT':
-              setPhotos(prev => {
-                const newPhoto = payload.new as Photo;
-                // Check if photo already exists to prevent duplicates
-                if (prev.some(p => p.id === newPhoto.id)) {
-                  return prev;
-                }
-                return [...prev, newPhoto];
-              });
-              break;
-              
-            case 'DELETE':
-              setPhotos(prev => prev.filter(p => p.id !== payload.old.id));
-              break;
-              
-            case 'UPDATE':
-              setPhotos(prev => prev.map(p => 
-                p.id === payload.new.id ? payload.new as Photo : p
-              ));
-              break;
-          }
-        }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'collage_settings',
-          filter: `collage_id=eq.${collageId}`
-        },
-        (payload) => {
-          console.log('Realtime settings change:', payload);
-          const newSettings = payload.new.settings;
-          setSettings(prev => ({ ...defaultSettings, ...prev, ...newSettings }));
-        }
-      )
-      .subscribe((status) => {
-        console.log('Realtime subscription status:', status);
-      });
-
-    realtimeChannelRef.current = channel;
-  }, [collageId, defaultSettings]);
-
-  // Initial data fetch
-  useEffect(() => {
-    fetchCollageData();
-  }, [fetchCollageData]);
-
-  // Set up realtime when collageId is available
-  useEffect(() => {
-    if (collageId) {
-      setupRealtimeSubscription();
-    }
-
-    return () => {
-      if (realtimeChannelRef.current) {
-        supabase.removeChannel(realtimeChannelRef.current);
-      }
-    };
-  }, [collageId, setupRealtimeSubscription]);
-
-  if (loading) {
+  if (loading && !currentCollage) {
     return (
-      <div className="flex items-center justify-center h-screen bg-black text-white">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-white mx-auto mb-4"></div>
-          <p>Loading collage...</p>
+      <Layout>
+        <div className="min-h-[calc(100vh-160px)] flex items-center justify-center">
+          <div className="text-center">
+            <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-white mb-4"></div>
+            <p className="text-white">Loading collage...</p>
+          </div>
         </div>
-      </div>
+      </Layout>
     );
   }
 
-  if (error) {
+  if (error || !currentCollage) {
     return (
-      <div className="flex items-center justify-center h-screen bg-black text-white">
-        <div className="text-center">
-          <h2 className="text-2xl font-bold mb-4">Error</h2>
-          <p className="text-red-400 mb-4">{error}</p>
-          <button 
-            onClick={fetchCollageData}
-            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded transition-colors"
-          >
-            Try Again
-          </button>
+      <Layout>
+        <div className="min-h-[calc(100vh-160px)] flex items-center justify-center">
+          <div className="text-center">
+            <h2 className="text-2xl font-bold text-white mb-4">Collage Not Found</h2>
+            <p className="text-gray-400 mb-6">The collage code "{code}" doesn't exist.</p>
+            <button
+              onClick={() => navigate('/join')}
+              className="px-6 py-3 bg-purple-600 hover:bg-purple-700 text-white rounded-md transition-colors"
+            >
+              Try Another Code
+            </button>
+          </div>
         </div>
-      </div>
-    );
-  }
-
-  if (!settings) {
-    return (
-      <div className="flex items-center justify-center h-screen bg-black text-white">
-        <p>Initializing scene...</p>
-      </div>
+      </Layout>
     );
   }
 
   return (
-    <div className="w-full h-screen relative">
-      <div 
-        ref={containerRef} 
-        className="w-full h-full"
-        style={{ backgroundColor: settings.backgroundColor }}
-      />
-      
-      {/* Debug info - remove in production */}
-      <div className="absolute top-4 left-4 text-white text-sm bg-black bg-opacity-50 p-2 rounded">
-        <p>Photos: {photos.length}</p>
-        <p>Stock Photos: {stockPhotos.length}</p>
-        <p>Total Slots: {settings.photoCount}</p>
-        <p>Empty Slots: {Math.max(0, settings.photoCount - photos.length - (settings.useStockPhotos ? stockPhotos.length : 0))}</p>
+    <Layout>
+      <div className="relative h-screen overflow-hidden">
+        {/* Header - Only show when not in fullscreen */}
+        {!isFullscreen && (
+          <div className="absolute top-0 left-0 right-0 z-20 bg-black/50 backdrop-blur-sm border-b border-white/10">
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+              <div className="flex items-center justify-between h-16">
+                <div className="flex items-center space-x-4">
+                  <button
+                    onClick={() => navigate('/join')}
+                    className="text-gray-400 hover:text-white transition-colors"
+                  >
+                    <ArrowLeft className="w-6 h-6" />
+                  </button>
+                  <div>
+                    <h1 className="text-xl font-bold text-white">{currentCollage.name}</h1>
+                    <div className="flex items-center space-x-4 text-sm">
+                      <span className="text-gray-400">Code: {currentCollage.code}</span>
+                      <span className="text-gray-400">•</span>
+                      <span className="text-gray-400">{photos.length} photos</span>
+                      <span className="text-gray-400">•</span>
+                      <div className="flex items-center space-x-1">
+                        <div className={`w-2 h-2 rounded-full ${
+                          isRealtimeConnected ? 'bg-green-400 animate-pulse' : 'bg-yellow-400'
+                        }`}></div>
+                        <span className="text-gray-400">
+                          {isRealtimeConnected ? 'Live' : 'Polling'}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                
+                <div className="flex items-center space-x-2">
+                  <button
+                    onClick={() => setShowUploader(!showUploader)}
+                    className="p-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors"
+                    title="Upload Photos"
+                  >
+                    <Upload className="w-5 h-5" />
+                  </button>
+                  
+                  <button
+                    onClick={() => navigate(`/photobooth/${currentCollage.code}`)}
+                    className="p-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
+                    title="Open Photobooth"
+                  >
+                    <Eye className="w-5 h-5" />
+                  </button>
+                  
+                  <button
+                    onClick={shareCollage}
+                    className="p-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors"
+                    title="Share Collage"
+                  >
+                    <Share2 className="w-5 h-5" />
+                  </button>
+                  
+                  <button
+                    onClick={toggleFullscreen}
+                    className="p-2 bg-gray-600 hover:bg-gray-700 text-white rounded-lg transition-colors"
+                    title="Toggle Fullscreen"
+                  >
+                    <Maximize2 className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Photo Uploader Sidebar */}
+        {showUploader && !isFullscreen && (
+          <div className="absolute top-16 right-0 w-80 h-[calc(100vh-64px)] bg-gray-900/95 backdrop-blur-sm border-l border-white/10 z-10 overflow-y-auto">
+            <div className="p-4">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold text-white">Upload Photos</h3>
+                <button
+                  onClick={() => setShowUploader(false)}
+                  className="text-gray-400 hover:text-white transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <PhotoUploader 
+                collageId={currentCollage.id}
+                onUploadComplete={() => {
+                  // Photos will appear automatically via realtime
+                  console.log('Upload completed, realtime should update the scene');
+                }}
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Main 3D Scene */}
+        <div className={`w-full h-full ${!isFullscreen ? 'pt-16' : ''}`}>
+          <ErrorBoundary
+            FallbackComponent={SceneErrorFallback}
+            onReset={() => window.location.reload()}
+            resetKeys={[currentCollage.id, photos.length]}
+          >
+            <CollageScene 
+              settings={settings}
+            />
+          </ErrorBoundary>
+        </div>
+
+        {/* Fullscreen Exit Button */}
+        {isFullscreen && (
+          <button
+            onClick={toggleFullscreen}
+            className="absolute top-4 right-4 z-30 p-2 bg-black/50 hover:bg-black/70 text-white rounded-lg transition-colors"
+            title="Exit Fullscreen"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        )}
       </div>
-      
-      <CollageScene
-        photos={photos}
-        stockPhotos={stockPhotos}
-        settings={settings}
-        containerRef={containerRef}
-      />
-    </div>
+    </Layout>
   );
 };
+
+export default CollageViewerPage;
