@@ -346,17 +346,26 @@ const AnimationController: React.FC<{
 
 // SceneContent component
 const SceneContent: React.FC<{ settings: SceneSettings }> = ({ settings }) => {
-  // Get photos directly from store for real-time updates
-  const photos = useCollageStore(state => state.photos);
+  // Get ONLY uploaded photos from store - NO STOCK PHOTOS
+  const uploadedPhotos = useCollageStore(state => state.photos);
   const [animationTime, setAnimationTime] = useState(0);
   
-  // Use custom hook for position calculation
-  const { photosWithPositions } = usePhotoPositions(photos, settings, animationTime);
+  // Use ONLY uploaded photos - no stock photos
+  const { photosWithPositions } = usePhotoPositions(uploadedPhotos, settings, animationTime);
   
   // Update animation time
   const handleTimeUpdate = (time: number) => {
     setAnimationTime(time);
   };
+  
+  // Debug log to verify we're only using uploaded photos
+  useEffect(() => {
+    console.log('🎬 SCENE: Using photos:', {
+      uploadedCount: uploadedPhotos.length,
+      totalSlots: settings.photoCount,
+      emptySlots: Math.max(0, (settings.photoCount || 50) - uploadedPhotos.length)
+    });
+  }, [uploadedPhotos.length, settings.photoCount]);
   
   return (
     <>
