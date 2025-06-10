@@ -12,74 +12,61 @@ export const useRealtimeCollage = ({
   collageCode, 
   autoConnect = true 
 }: UseRealtimeCollageOptions) => {
-  // Get store state - this will cause re-renders when state changes
-  const {
-    currentCollage,
-    photos,
-    loading,
-    error,
-    isRealtimeConnected,
-    fetchCollageById,
-    fetchCollageByCode,
-    cleanupRealtimeSubscription,
-    refreshPhotos,
-    deletePhoto,
-    uploadPhoto
-  } = useCollageStore();
-
-  // Track if we've already set up the connection
+  const store = useCollageStore();
   const hasConnected = useRef(false);
-  const [debugInfo, setDebugInfo] = useState({
-    connectionAttempts: 0,
-    lastUpdate: Date.now()
-  });
-
-  // Single effect to handle connection setup
+  
+  // STABLE PHOTO COUNT - Only track count, not array reference
+  const [stablePhotoCount, setStablePhotoCount] = useState(0);
+  
+  // Update stable photo count when photos change
   useEffect(() => {
-    if (!autoConnect) return;
-    
-    // Prevent multiple connections
-    if (hasConnected.current) return;
+    const currentCount = Array.isArray(store.photos) ? store.photos.length : 0;
+    setStablePhotoCount(currentCount);
+  }, [store.photos]);
+
+  // Connection setup (unchanged)
+  useEffect(() => {
+    if (!autoConnect || hasConnected.current) return;
     
     const setupConnection = async () => {
       hasConnected.current = true;
       
-      setDebugInfo(prev => ({ 
-        ...prev, 
-        connectionAttempts: prev.connectionAttempts + 1 
-      }));
-      
       try {
         if (collageId) {
           console.log('🪝 HOOK: Connecting to collage by ID:', collageId);
-          await fetchCollageById(collageId);
+          await store.fetchCollageById(collageId);
         } else if (collageCode) {
           console.log('🪝 HOOK: Connecting to collage by code:', collageCode);
-          await fetchCollageByCode(collageCode);
+          await store.fetchCollageByCode(collageCode);
         }
       } catch (error) {
         console.error('🪝 HOOK: Connection error:', error);
-        hasConnected.current = false; // Allow retry
+        hasConnected.current = false;
       }
     };
 
     setupConnection();
 
-    // Cleanup on unmount or when dependencies change
     return () => {
       console.log('🪝 HOOK: Cleaning up connection');
       hasConnected.current = false;
-      cleanupRealtimeSubscription();
+      store.cleanupRealtimeSubscription();
     };
-  }, [collageId, collageCode, autoConnect]); // Only depend on primitive values
+  }, [collageId, collageCode, autoConnect, store]);
 
-  // Debug effect to track photo changes
+  // Debug info state
+  const [debugInfo, setDebugInfo] = useState({
+    connectionAttempts: 0,
+    lastUpdate: Date.now()
+  });
+
+  // Update debug info when photos change
   useEffect(() => {
-    if (photos.length > 0) {
+    if (store.photos.length > 0) {
       console.log('🪝 HOOK: Photos updated!', {
-        count: photos.length,
-        ids: photos.slice(0, 3).map(p => p.id.slice(-4)), // Show first 3
-        realtime: isRealtimeConnected
+        count: store.photos.length,
+        ids: store.photos.slice(0, 3).map(p => p.id.slice(-4)), // Show first 3
+        realtime: store.isRealtimeConnected
       });
       
       setDebugInfo(prev => ({ 
@@ -87,29 +74,30 @@ export const useRealtimeCollage = ({
         lastUpdate: Date.now() 
       }));
     }
-  }, [photos.length, photos, isRealtimeConnected]);
+  }, [store.photos, store.isRealtimeConnected]);
 
   // Manual refresh function
   const manualRefresh = async () => {
-    if (currentCollage?.id) {
+    if (store.currentCollage?.id) {
       console.log('🪝 HOOK: Manual refresh triggered');
-      await refreshPhotos(currentCollage.id);
+      await store.refreshPhotos(store.currentCollage.id);
     }
   };
 
   // Return all the data components need
   return {
     // Core data
-    currentCollage,
-    photos: Array.isArray(photos) ? photos : [], // Safety check
-    loading,
-    error,
-    isRealtimeConnected,
+    currentCollage: store.currentCollage,
+    photos: Array.isArray(store.photos) ? store.photos : [], // Safety check
+    photoCount: stablePhotoCount, // Stable count for ErrorBoundary
+    loading: store.loading,
+    error: store.error,
+    isRealtimeConnected: store.isRealtimeConnected,
     
     // Actions
     refreshPhotos: manualRefresh,
-    deletePhoto,
-    uploadPhoto,
+    deletePhoto: store.deletePhoto,
+    uploadPhoto: store.uploadPhoto,
     
     // Debug info
     debugInfo

@@ -11,6 +11,7 @@ const CollageModerationPage: React.FC = () => {
   const { 
     currentCollage, 
     photos, 
+    photoCount, // Use stable count
     loading, 
     error, 
     isRealtimeConnected,
@@ -48,6 +49,11 @@ const CollageModerationPage: React.FC = () => {
     try {
       await deletePhoto(photoId);
       console.log('🗑️ MODERATION: Photo deleted, realtime should update UI');
+      
+      // Close preview if the deleted photo was selected
+      if (selectedPhoto?.id === photoId) {
+        setSelectedPhoto(null);
+      }
     } catch (error: any) {
       console.error('🗑️ MODERATION: Delete error:', error);
       alert('Failed to delete photo: ' + error.message);
@@ -111,7 +117,7 @@ const CollageModerationPage: React.FC = () => {
               <div className="flex items-center space-x-4 mt-2 text-sm">
                 <span className="text-gray-400">Code: {currentCollage.code}</span>
                 <span className="text-gray-400">•</span>
-                <span className="text-gray-400">{photos.length} photos</span>
+                <span className="text-gray-400">{photoCount} photos</span>
                 <span className="text-gray-400">•</span>
                 <div className="flex items-center space-x-1">
                   <div className={`w-2 h-2 rounded-full ${
@@ -177,6 +183,7 @@ const CollageModerationPage: React.FC = () => {
                       alt="Uploaded photo"
                       className="w-full h-full object-cover cursor-pointer"
                       onClick={() => setSelectedPhoto(photo)}
+                      loading="lazy"
                     />
                     <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center space-x-2">
                       <button

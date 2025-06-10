@@ -33,7 +33,7 @@ const CollageViewerPage: React.FC = () => {
   // This hook will automatically handle realtime updates
   const { 
     currentCollage, 
-    photos, 
+    photoCount, // Use stable count instead of photos array
     loading, 
     error, 
     isRealtimeConnected,
@@ -130,7 +130,7 @@ const CollageViewerPage: React.FC = () => {
         <div className="bg-gray-900/80 text-white rounded-lg p-3 backdrop-blur-sm border border-gray-600">
           <h1 className="font-bold">{currentCollage.name}</h1>
           <p className="text-sm text-gray-400">
-            Code: {currentCollage.code} • {photos.length} photos
+            Code: {currentCollage.code} • {photoCount} photos
           </p>
           <p className="text-xs text-gray-500">
             Last update: {new Date(debugInfo.lastUpdate).toLocaleTimeString()}
@@ -155,22 +155,21 @@ const CollageViewerPage: React.FC = () => {
               collageId={currentCollage.id} 
               onUploadComplete={() => {
                 setShowUploader(false);
-                console.log('📤 Upload completed, realtime should update UI');
+                console.log('📤 Upload completed, scene will update gracefully');
               }}
             />
           </div>
         </div>
       )}
 
-      {/* 3D Scene - This will automatically re-render when photos change */}
+      {/* 3D Scene - CRITICAL: Only use collageId as resetKey */}
       <div className="w-full h-screen">
         <ErrorBoundary
           FallbackComponent={SceneErrorFallback}
           onReset={() => window.location.reload()}
-          resetKeys={[currentCollage.id, photos.length]} // Re-mount scene when photos change
+          resetKeys={[currentCollage.id]} // ONLY collage ID, not photo count
         >
           <CollageScene 
-            photos={photos} 
             settings={currentCollage.settings} 
           />
         </ErrorBoundary>

@@ -1,8 +1,9 @@
-// src/store/collageStore.ts - ENHANCED WITH BETTER REAL-TIME AND DELETION
+// src/store/collageStore.ts - OPTIMIZED FOR PERFORMANCE
 import { create } from 'zustand';
 import { supabase } from '../lib/supabase';
 import { nanoid } from 'nanoid';
 import { RealtimeChannel } from '@supabase/supabase-js';
+import { textureCache } from '../lib/textureCache';
 
 // Helper function to get file URL
 const getFileUrl = (bucket: string, path: string): string => {
@@ -25,7 +26,7 @@ function deepMerge(target: any, source: any): any {
 
 // Default scene settings
 const defaultSettings = {
-  animationPattern: 'grid_wall',
+  animationPattern: 'grid',
   photoCount: 100,
   animationSpeed: 50,
   cameraDistance: 15,
@@ -44,7 +45,7 @@ const defaultSettings = {
   ambientLightIntensity: 0.4,
   spotlightIntensity: 0.8,
   patterns: {
-    grid_wall: { enabled: true },
+    grid: { enabled: true },
     float: { enabled: false },
     wave: { enabled: false },
     spiral: { enabled: false }
@@ -89,9 +90,17 @@ export interface SceneSettings {
   [key: string]: any;
 }
 
+// Optimized photo state with Map for O(1) lookups
+interface PhotoState {
+  byId: Map<string, Photo>;
+  allIds: string[];
+  lastUpdated: number;
+}
+
 interface CollageStore {
   // State
-  photos: Photo[];
+  photoState: PhotoState;
+  photos: Photo[]; // Derived from photoState for backward compatibility
   currentCollage: Collage | null;
   loading: boolean;
   error: string | null;
@@ -125,7 +134,15 @@ interface CollageStore {
 
 export const useCollageStore = create<CollageStore>((set, get) => ({
   // Initial state
-  photos: [],
+  photoState: {
+    byId: new Map<string, Photo>(),
+    allIds: [],
+    lastUpdated: 0
+  },
+  get photos() {
+    // Derived property that converts Map to array for backward compatibility
+    return get().photoState.allIds.map(id => get().photoState.byId.get(id)!);
+  },
   currentCollage: null,
   loading: false,
   error: null,
@@ -135,40 +152,58 @@ export const useCollageStore = create<CollageStore>((set, get) => ({
   lastRefreshTime: 0,
   pollingInterval: null,
 
-  // Add photo to state - ENHANCED
+  // OPTIMIZED: Add photo to state with Map for O(1) lookups
   addPhotoToState: (photo: Photo) => {
     set((state) => {
-      const exists = state.photos.some(p => p.id === photo.id);
-      if (exists) {
+      // Check if photo already exists
+      if (state.photoState.byId.has(photo.id)) {
         console.log('🔄 Photo already exists in state:', photo.id);
         return state;
       }
       
       console.log('✅ Adding photo to state:', photo.id);
-      // Add new photo at the beginning (most recent first)
+      
+      // Create new Map to avoid mutation
+      const newById = new Map(state.photoState.byId);
+      newById.set(photo.id, photo);
+      
+      // Add to beginning of allIds array (most recent first)
+      const newAllIds = [photo.id, ...state.photoState.allIds];
+      
       return {
-        photos: [photo, ...state.photos],
+        photoState: {
+          byId: newById,
+          allIds: newAllIds,
+          lastUpdated: Date.now()
+        },
         lastRefreshTime: Date.now()
       };
     });
   },
 
-  // Remove photo from state - ENHANCED
+  // OPTIMIZED: Remove photo from state with O(1) lookup
   removePhotoFromState: (photoId: string) => {
     console.log('🗑️ Removing photo from state:', photoId);
     set((state) => {
-      const beforeCount = state.photos.length;
-      const newPhotos = state.photos.filter(p => p.id !== photoId);
-      const afterCount = newPhotos.length;
-      
-      console.log(`🗑️ Photos: ${beforeCount} -> ${afterCount}`);
-      
-      if (beforeCount === afterCount) {
+      // Check if photo exists
+      if (!state.photoState.byId.has(photoId)) {
         console.log('⚠️ Photo not found in state for removal:', photoId);
+        return state;
       }
       
+      // Create new Map without the photo
+      const newById = new Map(state.photoState.byId);
+      newById.delete(photoId);
+      
+      // Filter out the ID
+      const newAllIds = state.photoState.allIds.filter(id => id !== photoId);
+      
       return {
-        photos: newPhotos,
+        photoState: {
+          byId: newById,
+          allIds: newAllIds,
+          lastUpdated: Date.now()
+        },
         lastRefreshTime: Date.now()
       };
     });
@@ -204,13 +239,8 @@ export const useCollageStore = create<CollageStore>((set, get) => ({
           }
           else if (payload.eventType === 'UPDATE' && payload.new) {
             console.log('📝 REALTIME UPDATE:', payload.new.id);
-            // Handle photo updates if needed
-            set((state) => ({
-              photos: state.photos.map(p => 
-                p.id === payload.new.id ? { ...p, ...payload.new } : p
-              ),
-              lastRefreshTime: Date.now()
-            }));
+            // Handle photo updates
+            get().addPhotoToState(payload.new as Photo);
           }
         }
       )
@@ -258,7 +288,7 @@ export const useCollageStore = create<CollageStore>((set, get) => ({
   startPolling: (collageId: string) => {
     get().stopPolling();
     
-    console.log('🔄 Starting polling for collage:', collageId, '(every 2 seconds)');
+    console.log('🔄 Starting polling for collage:', collageId);
     
     const interval = setInterval(async () => {
       try {
@@ -270,17 +300,25 @@ export const useCollageStore = create<CollageStore>((set, get) => ({
 
         if (error) throw error;
         
-        const currentPhotoIds = get().photos.map(p => p.id).sort().join(',');
-        const newPhotoIds = (data || []).map(p => p.id).sort().join(',');
+        // Check if data has changed by comparing IDs
+        const currentIds = get().photoState.allIds;
+        const newIds = (data || []).map(p => p.id);
         
-        if (currentPhotoIds !== newPhotoIds) {
-          console.log('📡 Polling detected changes, updating state');
-          set({ 
-            photos: data as Photo[], 
-            lastRefreshTime: Date.now() 
-          });
+        // Simple check if arrays have different lengths
+        if (currentIds.length !== newIds.length) {
+          console.log('📡 Polling detected count change:', currentIds.length, '->', newIds.length);
+          get().updatePhotosFromArray(data as Photo[]);
         } else {
-          console.log('📡 Polling check - no changes detected');
+          // More expensive check if arrays have same length but different content
+          const currentSet = new Set(currentIds);
+          const hasChanges = newIds.some(id => !currentSet.has(id));
+          
+          if (hasChanges) {
+            console.log('📡 Polling detected content change');
+            get().updatePhotosFromArray(data as Photo[]);
+          } else {
+            console.log('📡 Polling check - no changes detected');
+          }
         }
       } catch (error) {
         console.error('❌ Polling error:', error);
@@ -299,6 +337,39 @@ export const useCollageStore = create<CollageStore>((set, get) => ({
     }
   },
 
+  // OPTIMIZED: Update photos from array with diffing
+  updatePhotosFromArray: (photos: Photo[]) => {
+    set((state) => {
+      const currentState = state.photoState;
+      const newById = new Map(currentState.byId);
+      const newAllIds: string[] = [];
+      
+      // Process all photos
+      for (const photo of photos) {
+        newById.set(photo.id, photo);
+        newAllIds.push(photo.id);
+      }
+      
+      // Find deleted photos
+      const newIdSet = new Set(newAllIds);
+      const deletedIds = currentState.allIds.filter(id => !newIdSet.has(id));
+      
+      // Remove deleted photos
+      for (const id of deletedIds) {
+        newById.delete(id);
+      }
+      
+      return {
+        photoState: {
+          byId: newById,
+          allIds: newAllIds,
+          lastUpdated: Date.now()
+        },
+        lastRefreshTime: Date.now()
+      };
+    });
+  },
+
   refreshPhotos: async (collageId: string) => {
     try {
       console.log('🔄 Refreshing photos for collage:', collageId);
@@ -312,12 +383,11 @@ export const useCollageStore = create<CollageStore>((set, get) => ({
       if (error) throw error;
       
       console.log('📸 Refreshed photos count:', data?.length || 0);
-      set({ 
-        photos: data as Photo[], 
-        error: null,
-        lastRefreshTime: Date.now()
-      });
       
+      // Use optimized update method
+      get().updatePhotosFromArray(data as Photo[]);
+      
+      set({ error: null });
     } catch (error: any) {
       console.error('❌ Refresh photos error:', error);
       set({ error: error.message });
@@ -338,11 +408,11 @@ export const useCollageStore = create<CollageStore>((set, get) => ({
       if (error) throw error;
       
       console.log('📸 Fetched photos:', data?.length || 0);
-      set({ 
-        photos: data as Photo[], 
-        lastRefreshTime: Date.now() 
-      });
       
+      // Use optimized update method
+      get().updatePhotosFromArray(data as Photo[]);
+      
+      set({ lastRefreshTime: Date.now() });
     } catch (error: any) {
       console.error('❌ Fetch photos error:', error);
       set({ error: error.message });
@@ -567,8 +637,10 @@ export const useCollageStore = create<CollageStore>((set, get) => ({
       console.log('✅ Photo record created:', photo.id);
       console.log('🔔 Realtime should now broadcast this to all clients');
       
-      return photo as Photo;
+      // Preload the texture into cache for immediate use
+      textureCache.getTexture(publicUrl).catch(console.error);
       
+      return photo as Photo;
     } catch (error: any) {
       console.error('❌ Upload photo error:', error);
       throw error;
@@ -580,7 +652,7 @@ export const useCollageStore = create<CollageStore>((set, get) => ({
     try {
       console.log('🗑️ Starting photo deletion:', photoId);
       
-      // Immediately remove from state for responsive UI
+      // Optimistically remove from state for responsive UI
       get().removePhotoFromState(photoId);
       
       // First, get the photo to find the storage path
@@ -591,7 +663,7 @@ export const useCollageStore = create<CollageStore>((set, get) => ({
         .single();
 
       if (fetchError) {
-        console.warn('⚠️ Error fetching photo for deletion:', fetchError);
+        console.error('❌ Error fetching photo for deletion:', fetchError);
         // If the error is "no rows returned", the photo might already be deleted
         if (fetchError.code === 'PGRST116') {
           console.log('🔍 Photo not found in database, might already be deleted');
@@ -625,25 +697,19 @@ export const useCollageStore = create<CollageStore>((set, get) => ({
         .eq('id', photoId);
 
       if (dbError) {
-        console.warn('⚠️ Database deletion warning:', dbError);
-        // If the error is "no rows returned", the photo might already be deleted
-        if (dbError.code === 'PGRST116') {
-          console.log('🔍 Photo not found in database during deletion, might already be deleted');
-          return;
-        } else {
-          throw dbError;
-        }
+        console.error('❌ Database deletion error:', dbError);
+        throw dbError;
       }
 
       console.log('✅ Photo deleted successfully:', photoId);
       console.log('🔔 Realtime should now broadcast deletion to all clients');
       
+      // Remove from texture cache
+      if (photo.url) {
+        textureCache.dispose(photo.url);
+      }
     } catch (error: any) {
       console.error('❌ Delete photo error:', error);
-      // If there was an error, add the photo back to state
-      if (photo && photo.url) {
-        get().addPhotoToState(photo as Photo);
-      }
       throw error;
     }
   }
